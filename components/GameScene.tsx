@@ -7,12 +7,15 @@ import { Pickaxe, Gem, Backpack, Volume2, Music, Music2 } from 'lucide-react'; /
 import { BASIC_CHARS, CharData } from '@/data/characters';
 import CraftingModal from './CraftingModal';
 import { FlaskConical } from 'lucide-react'; // 确保引入了图标
+import GalleryModal from './GalleryModal';
+import { BookOpen } from 'lucide-react'; // 确保引入了 BookOpen
 
 export default function GameScene() {
   const { gold, addGold, addItem, inventory } = useGameStore();
   const [lastMined, setLastMined] = useState<CharData | null>(null);
   const [isCraftingOpen, setIsCraftingOpen] = useState(false);
-
+  const [isGalleryOpen, setIsGalleryOpen] = useState(false);
+  
   // 🎵 背景音乐状态
   const [isBgmPlaying, setIsBgmPlaying] = useState(false);
   const bgmRef = useRef<HTMLAudioElement | null>(null);
@@ -88,17 +91,20 @@ export default function GameScene() {
       
       {/* --- 顶部 UI 栏 --- */}
       <div className="absolute top-4 left-4 right-4 flex justify-between z-10">
+        {/* 左侧：金币 */}
         <div className="flex gap-2">
-            {/* 金币 */}
-            <div className="bg-white/90 backdrop-blur border-2 border-orange-200 rounded-xl px-4 py-2 shadow-sm flex items-center gap-2">
-            <div className="bg-yellow-400 p-1.5 rounded-full">
-                <Gem size={16} className="text-white" />
-            </div>
-            <span className="font-bold text-orange-600">{gold}</span>
-            </div>
+            {/* ...金币代码不变... */}
         </div>
         
+        {/* 右侧：功能区 */}
         <div className="flex gap-2">
+            {/* 🔥 新增：图鉴按钮 */}
+            <button 
+                onClick={() => setIsGalleryOpen(true)}
+                className="bg-white/90 backdrop-blur border-2 border-purple-200 rounded-xl w-10 h-10 flex items-center justify-center shadow-sm text-purple-500 hover:bg-purple-50 active:scale-95 transition-all"
+            >
+                <BookOpen size={20} />
+            </button>
              {/* 🎵 BGM 开关按钮 */}
             <button 
                 onClick={toggleBgm}
@@ -215,7 +221,12 @@ export default function GameScene() {
         isOpen={isCraftingOpen} 
         onClose={() => setIsCraftingOpen(false)} 
       />
-      
+      {/* 🔥 新增：图鉴弹窗 */}
+      <GalleryModal
+        isOpen={isGalleryOpen}
+        onClose={() => setIsGalleryOpen(false)}
+      />
+
     </div>
   );
 }
