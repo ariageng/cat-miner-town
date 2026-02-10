@@ -1,4 +1,7 @@
 @import "tailwindcss";
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
 :root {
   --background: #ffffff;
@@ -20,7 +23,8 @@
 }
 
 body {
-  background: var(--background);
+  background-color: #FFF8E7; 
+  overflow: hidden; /* 防止滚动条出现 */
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }

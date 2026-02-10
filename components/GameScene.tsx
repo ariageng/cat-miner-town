@@ -1,232 +1,339 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { useState, useRef, useEffect } from 'react';
 import { useGameStore } from '@/store/gameStore';
-import { Pickaxe, Gem, Backpack, Volume2, Music, Music2 } from 'lucide-react'; // 引入新图标
-import { BASIC_CHARS, CharData } from '@/data/characters';
+import { Gem, Backpack, Settings, Plus, Minus, Zap } from 'lucide-react';
+import { INITIAL_MAP_LAYOUT } from '@/data/gridMap';
+import IsoTile from './IsoTile';
+import CatGuide from './CatGuide';
+import IsoBuilding from './IsoBuilding';
+
+// 引入弹窗
+import MiningModal from './MiningModal';
 import CraftingModal from './CraftingModal';
-import { FlaskConical } from 'lucide-react'; // 确保引入了图标
 import GalleryModal from './GalleryModal';
-import { BookOpen } from 'lucide-react'; // 确保引入了 BookOpen
+import BuildModal from './BuildModal';
+import SettingsModal from './SettingsModal';
+import ArtLabModal from './ArtLabModal'; // 🔥 新引入写字楼弹窗
 
 export default function GameScene() {
-  const { gold, addGold, addItem, inventory } = useGameStore();
-  const [lastMined, setLastMined] = useState<CharData | null>(null);
-  const [isCraftingOpen, setIsCraftingOpen] = useState(false);
-  const [isGalleryOpen, setIsGalleryOpen] = useState(false);
+  const { 
+    gold, inventory, stamina, maxStamina, regenerateStamina, bgmVolume,
+    mapLevel, placedBuildings, residents, // 获取建造与地图数据
+    isPlacementMode, placementItem, cancelPlacement, confirmPlacement, // 获取放置模式相关状态
+    playSound
+  } = useGameStore(); 
   
-  // 🎵 背景音乐状态
-  const [isBgmPlaying, setIsBgmPlaying] = useState(false);
+  const [activeFeature, setActiveFeature] = useState<string | null>(null);
+
+  // 🎥 视口控制
+  const [zoom, setZoom] = useState(1);
+  const [position, setPosition] = useState({ x: 0, y: 0 });
+  const [isDragging, setIsDragging] = useState(false);
+  const lastMousePos = useRef({ x: 0, y: 0 });
+
+  // 🎵 BGM 逻辑
   const bgmRef = useRef<HTMLAudioElement | null>(null);
+
+  // 🖱️ 放置模式下的鼠标悬停格子坐标
+  const [hoverTile, setHoverTile] = useState<{row: number, col: number} | null>(null);
+
+  useEffect(() => {
+    const timer = setInterval(() => regenerateStamina(), 3000);
+    return () => clearInterval(timer);
+  }, [regenerateStamina]);
 
   // 初始化 BGM
   useEffect(() => {
-    // 创建音频对象
-    bgmRef.current = new Audio('/bgm.mp3');
-    bgmRef.current.loop = true;   // 循环播放
-    bgmRef.current.volume = 0.2;  // 音量设低一点，不要盖过朗读声
-    
+    if (typeof window !== 'undefined') {
+      bgmRef.current = new Audio('/bgm.mp3'); 
+      bgmRef.current.loop = true;
+    }
     return () => {
-      // 组件卸载时暂停
       if (bgmRef.current) {
         bgmRef.current.pause();
+        bgmRef.current = null;
       }
     };
   }, []);
 
-  // 开关背景音乐
-  const toggleBgm = () => {
-    if (!bgmRef.current) return;
-
-    if (isBgmPlaying) {
-      bgmRef.current.pause();
-    } else {
-      // 浏览器策略：必须有用户交互才能播放
-      bgmRef.current.play().catch(e => console.log("BGM play failed:", e));
+  // 🔥 监听全局音量变化，实时调整 BGM 音量
+  useEffect(() => {
+    if (bgmRef.current) {
+      bgmRef.current.volume = bgmVolume;
+      if (bgmVolume > 0 && bgmRef.current.paused) {
+         bgmRef.current.play().catch(() => {});
+      }
+      if (bgmVolume === 0) {
+          bgmRef.current.pause();
+      }
     }
-    setIsBgmPlaying(!isBgmPlaying);
-  };
+  }, [bgmVolume]);
 
-  // 🔊 朗读汉字
-  const speakChinese = (text: string) => {
-    if ('speechSynthesis' in window) {
-      window.speechSynthesis.cancel();
-      const utterance = new SpeechSynthesisUtterance(text);
-      utterance.lang = 'zh-CN';
-      utterance.rate = 0.8;
-      window.speechSynthesis.speak(utterance);
-    }
-  };
+  // --- 🗺️ 动态地图计算 ---
+  // 基础地图大小加上扩建等级 (每次四周扩1圈，所以尺寸+2)
+  const baseRows = INITIAL_MAP_LAYOUT.length;
+  const baseCols = INITIAL_MAP_LAYOUT[0]?.length || 10;
+  const currentRows = baseRows + mapLevel * 2;
+  const currentCols = baseCols + mapLevel * 2;
+  // 原始建筑的坐标偏移量
+  const offset = mapLevel;
 
-  // ⛏️ 挖矿音效
-  const playMineSound = () => {
-    try {
-      const audio = new Audio('/mine.mp3');
-      audio.volume = 0.4;
-      audio.play().catch(() => {});
-    } catch (e) {}
-  };
+  // --- 🖱️ 拖拽与放置逻辑 ---
+  const handleMouseDown = (e: React.MouseEvent) => {
+    if (e.button !== 0) return; // 只响应左键
 
-  const handleMine = () => {
-    playMineSound();
-    addGold(10);
-    
-    // 如果是第一次点击，且音乐没开，尝试自动播放音乐 (可选体验优化)
-    if (!isBgmPlaying && bgmRef.current) {
-        bgmRef.current.play().catch(() => {});
-        setIsBgmPlaying(true);
+    // 🔥 如果在放置模式且鼠标在一个格子上，点击就是放置建筑
+    if (isPlacementMode && hoverTile) {
+        const result = confirmPlacement(hoverTile.row, hoverTile.col);
+        if (!result.success) {
+            playSound('fail');
+            alert(result.msg);
+        }
+        return;
     }
 
-    const randomCharObj = BASIC_CHARS[Math.floor(Math.random() * BASIC_CHARS.length)];
-    addItem(randomCharObj.char);
-    setLastMined(randomCharObj);
-    speakChinese(randomCharObj.char);
-    
-    setTimeout(() => setLastMined(null), 2000);
+    // 否则执行拖拽地图
+    setIsDragging(true);
+    lastMousePos.current = { x: e.clientX, y: e.clientY };
+  };
+
+  const handleMouseMove = (e: React.MouseEvent) => {
+    if (!isDragging) return;
+    const deltaX = e.clientX - lastMousePos.current.x;
+    const deltaY = e.clientY - lastMousePos.current.y;
+    setPosition(prev => ({ x: prev.x + deltaX, y: prev.y + deltaY }));
+    lastMousePos.current = { x: e.clientX, y: e.clientY };
+  };
+
+  const handleMouseUp = () => setIsDragging(false);
+
+  const handleWheel = (e: React.WheelEvent) => {
+    e.stopPropagation();
+    const scaleAmount = -e.deltaY * 0.001;
+    setZoom(z => Math.min(Math.max(0.5, z + scaleAmount), 2.5));
+  };
+
+  // ================= 渲染函数 =================
+
+  // 1. 渲染动态地图格子
+  const renderTiles = () => {
+    const tiles = [];
+    for (let r = 0; r < currentRows; r++) {
+        for (let c = 0; c < currentCols; c++) {
+            tiles.push(
+                <IsoTile 
+                    key={`tile-${r}-${c}`} 
+                    row={r} 
+                    col={c} 
+                    // 传递给 IsoTile，让它在被 Hover 时告诉我们坐标
+                    onHover={() => setHoverTile({row: r, col: c})} 
+                />
+            );
+        }
+    }
+    return tiles;
+  };
+
+  // 2. 渲染静态和动态建筑
+  const renderBuildings = () => {
+    const buildings = [];
+
+    // ① 原有的主线建筑（带有偏移量，使其永远在地图中心）
+    INITIAL_MAP_LAYOUT.forEach((rowArray, r) => {
+        rowArray.forEach((content, c) => {
+            if (typeof content === 'string' && content !== '') {
+                buildings.push(
+                    <IsoBuilding
+                        key={`init-bldg-${r}-${c}`}
+                        row={r + offset} 
+                        col={c + offset}
+                        buildingId={content}
+                        onClick={() => setActiveFeature(content)}
+                    />
+                );
+            }
+        });
+    });
+
+    // ② 玩家放置的建筑
+    placedBuildings.forEach((b) => {
+        buildings.push(
+            <IsoBuilding
+                key={b.id}
+                row={b.row}
+                col={b.col}
+                buildingId={b.typeId}
+                onClick={() => {
+                    // 如果是写字楼，打开写字板；否则播放音效
+                    if (b.typeId === 'art_lab') {
+                        setActiveFeature('art_lab');
+                    } else {
+                        playSound('click');
+                    }
+                }}
+            />
+        );
+    });
+
+    // ③ 放置模式下的“幽灵建筑”预览
+    if (isPlacementMode && placementItem && hoverTile) {
+        buildings.push(
+            <div 
+                key="ghost-building" 
+                className="pointer-events-none opacity-50 grayscale transition-all duration-75"
+                style={{ zIndex: 9999 }} // 永远在最上层
+            >
+                <IsoBuilding
+                    row={hoverTile.row}
+                    col={hoverTile.col}
+                    buildingId={placementItem}
+                    onClick={() => {}}
+                />
+            </div>
+        );
+    }
+
+    return buildings;
+  };
+
+  // 3. 渲染猫咪居民
+  const renderResidents = () => {
+    // 假设格子宽120，高60。如果你的 IsoTile 定义不同，请同步修改。
+    const tw = 120; 
+    const th = 60;
+
+    return residents.map((cat, i) => {
+        // 让猫在初始建筑周围随机位置（伪随机）
+        const randomR = 5 + offset + Math.sin(i) * 2;
+        const randomC = 5 + offset + Math.cos(i) * 2;
+        const x = (randomC - randomR) * (tw / 2);
+        const y = (randomC + randomR) * (th / 2);
+
+        return (
+            <div 
+                key={cat.id}
+                className="absolute w-8 h-8 pointer-events-none z-[50]"
+                style={{
+                    left: x, top: y,
+                    transform: 'translate(-50%, -100%)',
+                    animation: `bounce 2s infinite ${i * 0.2}s` // 错开动画时间
+                }}
+            >
+                <span className="text-3xl drop-shadow-md">🐱</span>
+            </div>
+        );
+    });
   };
 
   return (
-    <div className="min-h-screen bg-[#FDF6E3] font-sans text-slate-800 overflow-hidden relative select-none">
+    <div 
+      className="w-screen h-screen bg-[#FFF8E7] overflow-hidden relative font-sans cursor-move active:cursor-grabbing text-slate-800 select-none"
+      onMouseDown={handleMouseDown}
+      onMouseMove={handleMouseMove}
+      onMouseUp={handleMouseUp}
+      onMouseLeave={handleMouseUp}
+      onWheel={handleWheel}
+    >
       
-      {/* --- 顶部 UI 栏 --- */}
-      <div className="absolute top-4 left-4 right-4 flex justify-between z-10">
-        {/* 左侧：金币 */}
-        <div className="flex gap-2">
-            {/* ...金币代码不变... */}
-        </div>
-        
-        {/* 右侧：功能区 */}
-        <div className="flex gap-2">
-            {/* 🔥 新增：图鉴按钮 */}
-            <button 
-                onClick={() => setIsGalleryOpen(true)}
-                className="bg-white/90 backdrop-blur border-2 border-purple-200 rounded-xl w-10 h-10 flex items-center justify-center shadow-sm text-purple-500 hover:bg-purple-50 active:scale-95 transition-all"
-            >
-                <BookOpen size={20} />
-            </button>
-             {/* 🎵 BGM 开关按钮 */}
-            <button 
-                onClick={toggleBgm}
-                className={`transition-all border-2 rounded-xl px-3 py-2 shadow-sm flex items-center gap-2 ${
-                    isBgmPlaying 
-                    ? "bg-rose-100 border-rose-300 text-rose-600" 
-                    : "bg-white/90 border-slate-200 text-slate-400"
-                }`}
-            >
-                {isBgmPlaying ? <Music size={18} className="animate-pulse" /> : <Music2 size={18} />}
-            </button>
+      {/* 背景 */}
+      <div className="absolute inset-0 opacity-10 pointer-events-none bg-[radial-gradient(#A8A29E_1px,transparent_1px)] bg-[length:24px_24px] z-0"></div>
+      
+      {/* 放置模式提示条 */}
+      {isPlacementMode && (
+          <div className="absolute top-24 left-1/2 -translate-x-1/2 bg-slate-800 text-white px-6 py-3 rounded-full shadow-xl z-[60] flex items-center gap-4 animate-bounce pointer-events-auto cursor-default">
+              <span className="font-bold">Placement Mode: Click grid to build</span>
+              <button 
+                onClick={(e) => { e.stopPropagation(); cancelPlacement(); }} 
+                className="bg-red-500 hover:bg-red-600 px-3 py-1 rounded-full text-xs font-black shadow-sm active:scale-95 transition-all"
+              >
+                CANCEL
+              </button>
+          </div>
+      )}
 
-            {/* 背包 */}
-            <div className="bg-white/90 backdrop-blur border-2 border-blue-200 rounded-xl px-4 py-2 shadow-sm flex items-center gap-2">
-            <Backpack size={16} className="text-blue-500" />
-            <span className="text-sm font-bold text-blue-600">{inventory.length}</span>
+      {/* 标题 */}
+      <div className="absolute top-24 left-0 w-full text-center z-0 pointer-events-none transition-opacity duration-300" style={{ opacity: Math.max(0, 1.5 - zoom) }}>
+          <h1 className="text-6xl font-black text-[#8B5E3C] tracking-tight drop-shadow-sm mb-2">
+            Cat Town
+          </h1>
+          <div className="flex justify-center gap-2">
+             <span className="text-3xl animate-bounce delay-75">🐱</span>
+             <span className="bg-[#8B5E3C]/10 text-[#8B5E3C] px-3 py-1 rounded-full text-sm font-bold">
+                Level 1 Miner
+             </span>
+          </div>
+      </div>
+
+      {/* --- 💎 UI 层 --- */}
+      <div className="absolute top-6 left-6 right-6 flex justify-between z-50 pointer-events-auto cursor-default" onMouseDown={(e) => e.stopPropagation()}>
+        
+        {/* 左侧 */}
+        <div className="flex flex-col gap-3">
+            <div className="bg-white border-b-4 border-orange-200 rounded-2xl px-5 py-2 flex items-center gap-3 shadow-sm hover:scale-105 transition-transform w-fit select-none">
+                <div className="bg-orange-400 p-1.5 rounded-full"><Gem size={18} className="text-white" /></div>
+                <span className="font-black text-orange-900 text-xl">{gold}</span>
+            </div>
+            <div className="bg-white border-b-4 border-yellow-200 rounded-2xl px-4 py-2 flex items-center gap-3 shadow-sm min-w-[160px] hover:scale-105 transition-transform select-none">
+                <div className="bg-yellow-400 p-1.5 rounded-full"><Zap size={18} className="text-white fill-current" /></div>
+                <div className="flex-1">
+                    <div className="flex justify-between text-xs font-bold text-yellow-800 mb-1">
+                        <span>ENERGY</span>
+                        <span>{stamina}/{maxStamina}</span>
+                    </div>
+                    <div className="w-24 h-3 bg-yellow-100 rounded-full overflow-hidden">
+                        <div className="h-full bg-yellow-400 transition-all duration-500 ease-out" style={{ width: `${(stamina / maxStamina) * 100}%` }}></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        {/* 右侧 */}
+        <div className="flex gap-3 h-14 items-start">
+             <button 
+                onClick={() => setActiveFeature('settings')}
+                className="bg-white w-14 h-14 rounded-2xl flex items-center justify-center border-b-4 border-slate-200 shadow-sm active:border-b-0 active:translate-y-1 transition-all text-slate-500 hover:bg-slate-50"
+             >
+                <Settings size={24} />
+             </button>
+            
+            <div className={`bg-white border-b-4 rounded-2xl px-5 h-14 flex items-center gap-3 shadow-sm transition-colors select-none ${inventory.length >= 10 ? 'border-red-200 bg-red-50' : 'border-blue-200'}`}>
+                <Backpack size={20} className={inventory.length >= 10 ? 'text-red-500 animate-bounce' : 'text-blue-500'} />
+                <span className={`font-black text-xl ${inventory.length >= 10 ? 'text-red-900' : 'text-blue-900'}`}>
+                    {inventory.length}/10
+                </span>
             </div>
         </div>
       </div>
 
-      {/* --- 游戏主舞台 --- */}
-      <div className="flex flex-col items-center justify-center h-screen gap-6">
-        
-        <div className="text-center mt-10">
-            <h1 className="text-4xl font-black text-amber-800 tracking-wider">Cat Miner</h1>
-            <p className="text-amber-600/60 text-sm font-medium mt-1 flex items-center justify-center gap-1">
-              <Volume2 size={12} /> Sound On
-            </p>
-        </div>
-
-        <div className="relative group cursor-pointer mt-4" onClick={handleMine}>
-          <AnimatePresence>
-            {lastMined && (
-                <motion.div 
-                    key={lastMined.char + Date.now()}
-                    initial={{ opacity: 0, scale: 0.5, y: 0 }}
-                    animate={{ opacity: 1, scale: 1, y: -110 }}
-                    exit={{ opacity: 0, y: -150 }}
-                    transition={{ type: "spring", stiffness: 200, damping: 15 }}
-                    className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none z-50"
-                >
-                    <div className="flex flex-col items-center bg-white/95 backdrop-blur shadow-xl rounded-2xl p-3 border-2 border-orange-100">
-                      <span className="text-6xl font-black text-orange-600 drop-shadow-sm mb-1">
-                        {lastMined.char}
-                      </span>
-                      <div className="flex flex-col items-center gap-1">
-                        <span className="text-lg font-bold text-slate-600 bg-slate-100 px-3 py-0.5 rounded-full">
-                          {lastMined.pinyin}
-                        </span>
-                        <span className="text-xs font-medium text-slate-400 uppercase tracking-wider">
-                          {lastMined.meaning}
-                        </span>
-                      </div>
-                    </div>
-                </motion.div>
-            )}
-          </AnimatePresence>
-
-          <motion.div 
-            className="absolute -top-14 -left-6 text-7xl z-20 pointer-events-none filter drop-shadow-lg"
-            animate={{ y: [0, -8, 0] }}
-            transition={{ repeat: Infinity, duration: 2.5, ease: "easeInOut" }}
-          >
-            🐱
-          </motion.div>
-
-          <motion.div
-            whileHover={{ scale: 1.02 }}
-            whileTap={{ scale: 0.95, rotate: -2 }}
-            className="w-52 h-52 bg-stone-100 rounded-3xl border-b-[12px] border-r-[12px] border-stone-300 shadow-xl flex items-center justify-center relative overflow-hidden active:border-b-4 active:border-r-4 active:translate-y-2 active:translate-x-2 transition-all z-10"
-          >
-            <div className="absolute inset-0 opacity-10 bg-[radial-gradient(circle_at_30%_30%,#000_1px,transparent_1px)] bg-[length:12px_12px]"></div>
-            <Pickaxe size={80} className="text-stone-300 opacity-80" />
-            <span className="absolute bottom-6 text-sm text-stone-400 font-bold uppercase tracking-widest">Tap to Mine</span>
-          </motion.div>
-        </div>
-
-        <div className="h-28 w-full max-w-md px-4 flex items-center justify-center gap-3 overflow-hidden mt-4">
-          <AnimatePresence mode='popLayout'>
-            {inventory.slice(-4).reverse().map((char, i) => {
-               const charData = BASIC_CHARS.find(c => c.char === char);
-               return (
-                  <motion.div
-                  key={`${char}-${i}`}
-                  layout
-                  initial={{ opacity: 0, y: 20, scale: 0.8 }}
-                  animate={{ opacity: 1, y: 0, scale: 1 }}
-                  exit={{ opacity: 0, scale: 0 }}
-                  className="w-16 h-20 bg-white border-2 border-stone-100 rounded-xl flex flex-col items-center justify-center shadow-sm shrink-0"
-                  >
-                  <span className="text-2xl font-bold text-slate-800">{char}</span>
-                  <span className="text-xs text-slate-500 font-medium">{charData?.pinyin}</span>
-                  </motion.div>
-               );
-            })}
-          </AnimatePresence>
-        </div>
-
+      {/* 缩放按钮 */}
+      <div className="absolute bottom-8 right-8 flex flex-col gap-2 z-50 pointer-events-auto cursor-default" onMouseDown={(e) => e.stopPropagation()}>
+        <button onClick={() => setZoom(z => Math.min(z + 0.2, 2.5))} className="w-12 h-12 bg-white rounded-2xl shadow-sm border-b-4 border-slate-200 flex items-center justify-center text-slate-600 hover:bg-slate-50 active:border-b-0 active:translate-y-1 transition-all"><Plus size={24} /></button>
+        <button onClick={() => setZoom(1)} className="w-12 h-12 bg-white rounded-2xl shadow-sm border-b-4 border-slate-200 flex items-center justify-center text-slate-400 hover:bg-slate-50 active:border-b-0 active:translate-y-1 transition-all"><span className="text-xs font-black">1x</span></button>
+        <button onClick={() => setZoom(z => Math.max(z - 0.2, 0.5))} className="w-12 h-12 bg-white rounded-2xl shadow-sm border-b-4 border-slate-200 flex items-center justify-center text-slate-600 hover:bg-slate-50 active:border-b-0 active:translate-y-1 transition-all"><Minus size={24} /></button>
       </div>
 
-      {/* 底部功能按钮区 (放在屏幕右下角) */}
-      <div className="absolute bottom-8 right-6 z-40">
-        <button 
-          onClick={() => setIsCraftingOpen(true)}
-          className="bg-amber-500 hover:bg-amber-600 text-white p-4 rounded-full shadow-xl border-4 border-white active:scale-90 transition-all flex flex-col items-center justify-center gap-1 w-20 h-20"
-        >
-          <FlaskConical size={28} />
-          <span className="text-[10px] font-bold uppercase">Craft</span>
-        </button>
+      {/* 地图层 */}
+      <div className="absolute inset-0 flex items-center justify-center transition-transform duration-75 ease-out z-10" style={{ transform: `translate(${position.x}px, ${position.y}px) scale(${zoom})` }}>
+        <div className="relative">
+            {renderTiles()}
+            {renderBuildings()}
+            {renderResidents()}
+        </div>
       </div>
 
-      {/* 弹窗组件 */}
-      <CraftingModal 
-        isOpen={isCraftingOpen} 
-        onClose={() => setIsCraftingOpen(false)} 
-      />
-      {/* 🔥 新增：图鉴弹窗 */}
-      <GalleryModal
-        isOpen={isGalleryOpen}
-        onClose={() => setIsGalleryOpen(false)}
-      />
+      <CatGuide />
 
+      {/* 弹窗层 */}
+      <MiningModal isOpen={activeFeature === 'mine'} onClose={() => setActiveFeature(null)} />
+      <CraftingModal isOpen={activeFeature === 'lab'} onClose={() => setActiveFeature(null)} />
+      <GalleryModal isOpen={activeFeature === 'museum'} onClose={() => setActiveFeature(null)} />
+      <BuildModal isOpen={activeFeature === 'shop'} onClose={() => setActiveFeature(null)} />
+      <SettingsModal isOpen={activeFeature === 'settings'} onClose={() => setActiveFeature(null)} />
+      
+      {/* 🔥 Art Lab (写字楼) 弹窗 */}
+      <ArtLabModal isOpen={activeFeature === 'art_lab'} onClose={() => setActiveFeature(null)} />
+      
     </div>
   );
 }

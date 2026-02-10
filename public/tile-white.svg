@@ -1,0 +1,13 @@
+<svg width="120" height="80" viewBox="0 0 120 80" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <path d="M60 78C85 78 105 70 105 60C105 50 85 42 60 42C35 42 15 50 15 60C15 70 35 78 60 78Z" fill="black" fill-opacity="0.15" filter="url(#blur)"/>
+  
+  <path d="M110 35L60 60L10 35V45L60 70L110 45V35Z" fill="#E4E4E7"/>
+  
+  <path d="M110 35L60 60L10 35L60 10L110 35Z" fill="#FAFAFA" stroke="white" stroke-width="2"/>
+  
+  <defs>
+    <filter id="blur" x="0" y="0" width="120" height="80" filterUnits="userSpaceOnUse">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="4"/>
+    </filter>
+  </defs>
+</svg>

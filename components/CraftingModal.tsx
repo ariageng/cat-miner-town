@@ -1,10 +1,9 @@
 'use client';
 
 import { useState } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
 import { useGameStore } from '@/store/gameStore';
-import { X, FlaskConical, Sparkles } from 'lucide-react';
-import { CharData } from '@/data/characters';
+import { X, Coins, Sparkles, Plus, FlaskConical, ArrowRight } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
 
 interface Props {
   isOpen: boolean;
@@ -12,144 +11,270 @@ interface Props {
 }
 
 export default function CraftingModal({ isOpen, onClose }: Props) {
-  const { inventory, craft } = useGameStore();
+  const { inventory, sellItem, combineItems, playTTS, playSound } = useGameStore();
   
-  // 研究台上的两个插槽
-  const [slot1, setSlot1] = useState<string | null>(null);
-  const [slot2, setSlot2] = useState<string | null>(null);
-  
-  // 合成成功时的展示数据
-  const [successResult, setSuccessResult] = useState<CharData | null>(null);
-  const [errorShake, setErrorShake] = useState(0);
+  // 状态管理
+  const [activeTab, setActiveTab] = useState<'market' | 'lab'>('market'); // 'market' 或 'lab'
+  const [selectedIndices, setSelectedIndices] = useState<number[]>([]); // 存的是背包里的索引(index)
+  const [resultMsg, setResultMsg] = useState<{success: boolean, char?: string, name?: string} | null>(null);
 
-  // 把背包里的东西放到插槽上
-  const handleSelectChar = (char: string) => {
-    if (!slot1) setSlot1(char);
-    else if (!slot2) setSlot2(char);
+  if (!isOpen) return null;
+
+  // --- 🛒 市场逻辑 ---
+  const handleSell = (index: number) => {
+    // 🔥 新增：播放金币音效
+    playSound('coin');
+    sellItem(index);
+    // 如果正在选中的东西被卖了，清理一下选择状态
+    if (selectedIndices.includes(index)) {
+      setSelectedIndices(prev => prev.filter(i => i !== index));
+    }
   };
 
-  // 点击插槽把东西拿下来
-  const clearSlot = (slotNum: 1 | 2) => {
-    if (slotNum === 1) setSlot1(null);
-    else setSlot2(null);
-  };
-
-  // 🔥 核心动作：点击合成按钮
-  const handleCraft = () => {
-    if (slot1 && slot2) {
-      const result = craft(slot1, slot2);
-      if (result) {
-        // 成功！
-        setSuccessResult(result);
-        setSlot1(null);
-        setSlot2(null);
-        // 播放个成功音效 (可选)
-      } else {
-        // 失败：晃动一下
-        setErrorShake(prev => prev + 1);
+  // --- ⚗️ 实验室逻辑 ---
+  const toggleSelection = (index: number) => {
+    if (selectedIndices.includes(index)) {
+      // 如果已选，取消选择
+      setSelectedIndices(prev => prev.filter(i => i !== index));
+    } else {
+      // 如果未选，且没满2个，添加选择
+      if (selectedIndices.length < 2) {
+        setSelectedIndices(prev => [...prev, index]);
       }
     }
   };
 
-  if (!isOpen) return null;
+  const handleCombine = () => {
+    if (selectedIndices.length !== 2) return;
+    
+    // 调用 Store 的合成逻辑
+    const result = combineItems(selectedIndices[0], selectedIndices[1]);
+    
+    if (result.success && result.newItem) {
+      // 成功！
+      setResultMsg({ success: true, char: result.newItem.char, name: result.newItem.name });
+      playTTS(result.newItem.char); // 朗读
+    } else {
+      // 失败
+      playSound('fail');
+      setResultMsg({ success: false });
+    }
+    
+    // 稍微延迟后清空状态
+    setSelectedIndices([]); 
+    setTimeout(() => setResultMsg(null), 2500);
+  };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
       <motion.div 
-        initial={{ scale: 0.9, opacity: 0 }}
-        animate={{ scale: 1, opacity: 1 }}
-        className="bg-[#FDF6E3] w-full max-w-md rounded-3xl shadow-2xl border-4 border-amber-200 overflow-hidden relative"
+        initial={{ y: 20, opacity: 0 }} 
+        animate={{ y: 0, opacity: 1 }} 
+        className="bg-[#FFF8E7] w-full max-w-2xl h-[650px] rounded-3xl shadow-2xl border-4 border-[#8B5E3C] flex flex-col overflow-hidden relative"
       >
-        {/* 关闭按钮 */}
-        <button onClick={onClose} className="absolute top-4 right-4 text-amber-800 hover:bg-amber-100 p-1 rounded-full">
-          <X size={24} />
-        </button>
-
-        {/* 标题 */}
-        <div className="bg-amber-100 p-4 text-center border-b-2 border-amber-200">
-          <h2 className="text-xl font-black text-amber-800 flex items-center justify-center gap-2">
-            <FlaskConical /> Research Lab
-          </h2>
+        
+        {/* --- 顶部 Tab 切换 --- */}
+        <div className="flex border-b-2 border-[#8B5E3C]/20 bg-white">
+            <button 
+                onClick={() => setActiveTab('market')}
+                className={`flex-1 p-4 font-black text-lg flex items-center justify-center gap-2 transition-colors relative
+                    ${activeTab === 'market' ? 'text-green-600 bg-green-50' : 'text-slate-400 hover:bg-slate-50'}`}
+            >
+                <Coins size={20} /> Market
+                {activeTab === 'market' && <div className="absolute bottom-0 left-0 w-full h-1 bg-green-500"></div>}
+            </button>
+            <button 
+                onClick={() => { setActiveTab('lab'); setSelectedIndices([]); }}
+                className={`flex-1 p-4 font-black text-lg flex items-center justify-center gap-2 transition-colors relative
+                    ${activeTab === 'lab' ? 'text-purple-600 bg-purple-50' : 'text-slate-400 hover:bg-slate-50'}`}
+            >
+                <FlaskConical size={20} /> Lab
+                {activeTab === 'lab' && <div className="absolute bottom-0 left-0 w-full h-1 bg-purple-500"></div>}
+            </button>
+            
+            {/* 关闭按钮 */}
+            <button onClick={onClose} className="px-6 border-l-2 border-[#8B5E3C]/20 text-slate-400 hover:bg-red-50 hover:text-red-500 transition-colors">
+                <X />
+            </button>
         </div>
 
-        <div className="p-6 flex flex-col gap-6 items-center">
-          
-          {/* --- 合成台 (两个框) --- */}
-          <div className="flex items-center gap-4">
-            {/* Slot 1 */}
-            <motion.div 
-              onClick={() => clearSlot(1)}
-              animate={{ x: errorShake % 2 === 0 ? 0 : 10 }} // 错误时晃动
-              className={`w-20 h-20 rounded-xl border-4 border-dashed flex items-center justify-center text-3xl font-bold cursor-pointer transition-all ${slot1 ? 'bg-white border-amber-400' : 'border-amber-200 bg-amber-50/50'}`}
-            >
-              {slot1}
-            </motion.div>
+        {/* --- 内容区域 --- */}
+        <div className="flex-1 overflow-y-auto p-6 bg-[#FFF8E7]">
+            
+            {/* ================= 🛒 市场模式 (卖东西) ================= */}
+            {activeTab === 'market' && (
+                <div className="flex flex-col h-full">
+                    <div className="mb-4 text-center text-[#8B5E3C]/60 font-bold text-sm uppercase tracking-widest">
+                        Sell duplicate items for Gold
+                    </div>
 
-            <span className="text-2xl font-black text-amber-300">+</span>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4 pb-20">
+                        {inventory.length === 0 && (
+                            <div className="col-span-full py-20 text-center text-slate-400 flex flex-col items-center">
+                                <span className="text-4xl mb-2">🕸️</span>
+                                Backpack is empty
+                            </div>
+                        )}
+                        
+                        {inventory.map((item, index) => (
+                            <motion.div 
+                                layout
+                                key={`${item.id}-${index}`} 
+                                className="bg-white p-3 rounded-2xl shadow-sm border-2 border-[#8B5E3C]/10 flex flex-col items-center gap-3 group hover:border-green-300 transition-all"
+                            >
+                                <div className="w-14 h-14 bg-slate-50 rounded-xl flex items-center justify-center text-3xl font-serif text-slate-700">
+                                    {item.char}
+                                </div>
+                                <div className="w-full">
+                                    <div className="flex justify-between text-xs text-slate-400 font-bold mb-1 px-1">
+                                        <span>{item.name}</span>
+                                        <span className="text-orange-400">{item.type === 'basic' ? 'Basic' : 'Rare'}</span>
+                                    </div>
+                                    <button 
+                                        onClick={() => handleSell(index)}
+                                        className="w-full py-2 bg-green-100 text-green-700 text-sm font-black rounded-xl hover:bg-green-500 hover:text-white hover:shadow-lg active:scale-95 transition-all flex items-center justify-center gap-1"
+                                    >
+                                        <Coins size={14} /> ${item.type === 'basic' ? 1 : 5}
+                                    </button>
+                                </div>
+                            </motion.div>
+                        ))}
+                    </div>
+                </div>
+            )}
 
-            {/* Slot 2 */}
-            <motion.div 
-              onClick={() => clearSlot(2)}
-              animate={{ x: errorShake % 2 === 0 ? 0 : -10 }}
-              className={`w-20 h-20 rounded-xl border-4 border-dashed flex items-center justify-center text-3xl font-bold cursor-pointer transition-all ${slot2 ? 'bg-white border-amber-400' : 'border-amber-200 bg-amber-50/50'}`}
-            >
-              {slot2}
-            </motion.div>
-          </div>
+            {/* ================= ⚗️ 实验室模式 (合成) ================= */}
+            {activeTab === 'lab' && (
+                <div className="flex flex-col h-full">
+                    
+                    {/* 1. 合成台显示区 */}
+                    <div className="bg-white rounded-3xl p-6 shadow-xl border-4 border-purple-100 mb-8 relative overflow-hidden min-h-[200px] flex flex-col items-center justify-center">
+                         
+                         {/* 背景装饰 */}
+                         <div className="absolute inset-0 opacity-5 bg-[radial-gradient(circle_at_50%_50%,#9333ea_1px,transparent_1px)] bg-[length:10px_10px]"></div>
 
-          {/* 合成按钮 */}
-          <button 
-            onClick={handleCraft}
-            disabled={!slot1 || !slot2}
-            className="bg-amber-500 text-white font-bold py-3 px-8 rounded-full shadow-lg active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-          >
-            <Sparkles size={18} /> COMBINE
-          </button>
+                         <div className="flex items-center gap-2 sm:gap-6 relative z-10">
+                            {/* 插槽 1 */}
+                            <SlotBox item={selectedIndices[0] !== undefined ? inventory[selectedIndices[0]] : null} />
+                            
+                            <Plus size={32} className="text-purple-300" />
+                            
+                            {/* 插槽 2 */}
+                            <SlotBox item={selectedIndices[1] !== undefined ? inventory[selectedIndices[1]] : null} />
+                            
+                            <ArrowRight size={32} className="text-purple-300" />
 
-          {/* 背包选择区 */}
-          <div className="w-full bg-white/50 rounded-xl p-3 min-h-[100px]">
-            <p className="text-xs font-bold text-amber-800/50 mb-2 uppercase">Select Ingredients:</p>
-            <div className="flex flex-wrap gap-2">
-              {inventory.map((char, i) => (
-                <button 
-                  key={i}
-                  onClick={() => handleSelectChar(char)}
-                  className="w-10 h-10 bg-white border border-amber-100 rounded-lg shadow-sm font-bold text-slate-700 hover:scale-110 active:scale-90 transition-transform"
-                >
-                  {char}
-                </button>
-              ))}
-              {inventory.length === 0 && <span className="text-sm text-slate-400">Go mine some rocks first!</span>}
-            </div>
-          </div>
+                            {/* 结果预览 (问号) */}
+                            <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-2xl border-4 border-dashed border-purple-200 bg-purple-50 flex items-center justify-center">
+                                <Sparkles className="text-purple-300 animate-pulse" />
+                            </div>
+                         </div>
+                         
+                         <button 
+                            disabled={selectedIndices.length !== 2}
+                            onClick={handleCombine}
+                            className={`
+                                mt-8 px-10 py-3 rounded-full font-black text-lg shadow-xl transition-all flex items-center gap-2 z-10
+                                ${selectedIndices.length === 2 
+                                    ? 'bg-purple-500 text-white hover:bg-purple-600 hover:scale-105 hover:shadow-purple-500/30 cursor-pointer' 
+                                    : 'bg-slate-200 text-slate-400 cursor-not-allowed'
+                                }
+                            `}
+                         >
+                            <FlaskConical size={20} />
+                            COMBINE
+                         </button>
+
+                         {/* ✨ 结果反馈遮罩 (合成成功/失败时显示) */}
+                         <AnimatePresence>
+                            {resultMsg && (
+                                <motion.div 
+                                    initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                                    className="absolute inset-0 bg-white/95 backdrop-blur-md z-20 flex flex-col items-center justify-center text-center p-4"
+                                >
+                                    {resultMsg.success ? (
+                                        <>
+                                            <motion.div 
+                                                initial={{ scale: 0.5, rotate: -180 }} 
+                                                animate={{ scale: 1, rotate: 0 }}
+                                                className="w-24 h-24 bg-gradient-to-br from-yellow-300 to-orange-400 rounded-3xl flex items-center justify-center text-6xl font-serif text-white shadow-2xl mb-4"
+                                            >
+                                                {resultMsg.char}
+                                            </motion.div>
+                                            <h3 className="text-2xl font-black text-slate-800">Success!</h3>
+                                            <p className="text-purple-500 font-bold text-lg">New Character: {resultMsg.name}</p>
+                                        </>
+                                    ) : (
+                                        <>
+                                            <motion.div 
+                                                initial={{ x: -10 }} animate={{ x: [0, -10, 10, -10, 10, 0] }}
+                                                className="text-6xl mb-2"
+                                            >
+                                                💥
+                                            </motion.div>
+                                            <h3 className="text-xl font-bold text-slate-500">Fusion Failed</h3>
+                                            <p className="text-sm text-slate-400">These items cannot be combined.</p>
+                                        </>
+                                    )}
+                                </motion.div>
+                            )}
+                         </AnimatePresence>
+                    </div>
+
+                    {/* 2. 物品选择区 */}
+                    <div className="flex-1">
+                        <div className="flex justify-between items-center mb-3 px-2">
+                            <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Select 2 Items</span>
+                            <span className="text-xs font-bold text-purple-600">{selectedIndices.length}/2 Selected</span>
+                        </div>
+                        
+                        <div className="grid grid-cols-4 sm:grid-cols-5 gap-3 overflow-y-auto pb-4">
+                            {inventory.map((item, index) => {
+                                const isSelected = selectedIndices.includes(index);
+                                const isDisabled = !isSelected && selectedIndices.length >= 2;
+
+                                return (
+                                    <button 
+                                        key={`${item.id}-${index}-select`}
+                                        onClick={() => toggleSelection(index)}
+                                        disabled={isDisabled}
+                                        className={`
+                                            aspect-square rounded-2xl border-b-4 flex items-center justify-center text-2xl font-serif transition-all relative
+                                            ${isSelected 
+                                                ? 'bg-purple-500 border-purple-700 text-white translate-y-1 border-b-0 shadow-inner' 
+                                                : 'bg-white border-slate-200 text-slate-700 hover:border-purple-300 hover:-translate-y-1'
+                                            }
+                                            ${isDisabled ? 'opacity-40 cursor-not-allowed' : ''}
+                                        `}
+                                    >
+                                        {item.char}
+                                        {isSelected && (
+                                            <div className="absolute top-1 right-1 w-3 h-3 bg-white rounded-full text-purple-500 flex items-center justify-center text-[8px] font-bold">✓</div>
+                                        )}
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
-
-        {/* --- 成功弹窗 (覆盖在上面) --- */}
-        <AnimatePresence>
-          {successResult && (
-            <motion.div 
-              initial={{ opacity: 0, y: 50 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0 }}
-              className="absolute inset-0 bg-amber-500/95 flex flex-col items-center justify-center text-white z-10"
-            >
-              <h3 className="text-2xl font-bold mb-4">New Word Discovered!</h3>
-              <div className="bg-white text-amber-600 w-32 h-32 rounded-3xl flex items-center justify-center text-6xl font-black shadow-2xl mb-4">
-                {successResult.char}
-              </div>
-              <p className="text-2xl font-bold">{successResult.pinyin}</p>
-              <p className="text-lg opacity-90">{successResult.meaning}</p>
-              
-              <button 
-                onClick={() => setSuccessResult(null)}
-                className="mt-8 bg-white text-amber-600 font-bold px-6 py-2 rounded-full shadow-lg"
-              >
-                Awesome!
-              </button>
-            </motion.div>
-          )}
-        </AnimatePresence>
       </motion.div>
     </div>
   );
+}
+
+// 辅助组件：显示插槽的小方块
+function SlotBox({ item }: { item: any }) {
+    return (
+        <div className={`
+            w-20 h-20 sm:w-24 sm:h-24 rounded-2xl border-4 flex items-center justify-center text-4xl font-serif transition-all shadow-sm
+            ${item 
+                ? 'bg-white border-purple-400 text-slate-800' 
+                : 'bg-slate-100 border-slate-200 border-dashed text-slate-300'
+            }
+        `}>
+            {item ? item.char : '?'}
+        </div>
+    );
 }
