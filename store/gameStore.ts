@@ -86,7 +86,6 @@ export const useGameStore = create<GameState>()(
   persist(
     (set, get) => ({
       // ================= 初始状态 =================
-      // 🆔 临时生成一个游客ID
       userId: `guest_${Math.floor(Math.random() * 1000000)}`, 
       lastSaveTime: Date.now(),
       version: 1,
@@ -112,13 +111,8 @@ export const useGameStore = create<GameState>()(
       syncToCloud: async () => {
         const state = get();
         console.log(`[Cloud Sync] Uploading save for User: ${state.userId}`);
-        console.log(`[Cloud Sync] Timestamp: ${new Date(state.lastSaveTime).toISOString()}`);
-        console.log(`[Cloud Sync] Data payload size: ${JSON.stringify(state).length} bytes`);
-        
         // 模拟网络延迟
         await new Promise(resolve => setTimeout(resolve, 500));
-        
-        // 这里以后替换成: await fetch('/api/save', { ... })
         console.log("[Cloud Sync] ✅ Save successful!");
       },
 
@@ -133,7 +127,7 @@ export const useGameStore = create<GameState>()(
 
       completeQuest: () => set((state) => ({ 
         questStep: state.questStep + 1,
-        lastSaveTime: Date.now() // 🔥 更新存档时间
+        lastSaveTime: Date.now()
       })),
 
       mineItem: (item) => {
@@ -149,7 +143,7 @@ export const useGameStore = create<GameState>()(
           unlockedCollection: state.unlockedCollection.includes(baseId) 
             ? state.unlockedCollection 
             : [...state.unlockedCollection, baseId],
-          lastSaveTime: Date.now() // 🔥 更新存档时间
+          lastSaveTime: Date.now()
         }));
         return { success: true, msg: "" };
       },
@@ -162,7 +156,7 @@ export const useGameStore = create<GameState>()(
         return { 
           gold: state.gold + price, 
           inventory: newInv,
-          lastSaveTime: Date.now() // 🔥 更新存档时间
+          lastSaveTime: Date.now()
         };
       }),
 
@@ -200,7 +194,7 @@ export const useGameStore = create<GameState>()(
           set({ 
             inventory: newInv, 
             unlockedCollection: newCollection,
-            lastSaveTime: Date.now() // 🔥 更新存档时间
+            lastSaveTime: Date.now()
           });
           return { success: true, newItem };
         }
@@ -255,7 +249,7 @@ export const useGameStore = create<GameState>()(
             residents: newResidents,
             isPlacementMode: false,
             placementItem: null,
-            lastSaveTime: Date.now() // 🔥 更新存档时间
+            lastSaveTime: Date.now()
         });
 
         get().playSound('build');
@@ -279,7 +273,7 @@ export const useGameStore = create<GameState>()(
         set({
             gold: state.gold - cost,
             mapLevel: state.mapLevel + 1,
-            lastSaveTime: Date.now() // 🔥 更新存档时间
+            lastSaveTime: Date.now()
         });
         
         get().playSound('success');
@@ -309,7 +303,7 @@ export const useGameStore = create<GameState>()(
         newInv.push(newItem);
         set({ 
             inventory: newInv,
-            lastSaveTime: Date.now() // 🔥 更新存档时间
+            lastSaveTime: Date.now()
         });
         
         get().playSound('transmute');
@@ -318,15 +312,15 @@ export const useGameStore = create<GameState>()(
 
       // ================= 🔊 播放系统 =================
       playTTS: (text) => {
-        const charData = BASIC_CHARS.find(c => c.char === text);
-        if (charData?.disableTTS && !charData.note) return;
-
+        // 🔥 修复：不再检查 disableTTS，因为该属性已废弃
+        // 我们直接检查浏览器是否支持语音，并使用映射表
         if ('speechSynthesis' in window) {
           window.speechSynthesis.cancel();
           const speakMap: Record<string, string> = {
             '氵': '水', '亻': '人', '扌': '手', '艹': '草', 
             '宀': '棉', '辶': '绰', '囗': '围'
           };
+          // 如果在映射表里，读原字；否则读字本身
           const textToSpeak = speakMap[text] || text;
           const utterance = new SpeechSynthesisUtterance(textToSpeak);
           utterance.lang = 'zh-CN';
@@ -365,7 +359,6 @@ export const useGameStore = create<GameState>()(
     }),
     { 
       name: 'cat-town-save-v7',
-      // 这里可以加监听器，每次加载存档时打印日志
       onRehydrateStorage: () => (state) => {
         if (state) {
             console.log(`[Save System] Loaded save for User: ${state.userId}`);

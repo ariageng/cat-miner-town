@@ -1,21 +1,27 @@
 'use client';
+import { useState, useEffect } from 'react'; // 🔥 1. 引入必要钩子
 import { motion, AnimatePresence } from 'framer-motion';
 import { useGameStore } from '@/store/gameStore';
 import { MAIN_QUESTS } from '@/data/quests';
-import { CheckCircle2, Gift, MessageCircle } from 'lucide-react';
+import { CheckCircle2, Gift, MessageCircle, Sparkles } from 'lucide-react';
 
 export default function CatGuide() {
   const { questStep, completeQuest } = useGameStore();
   
-  // Get current quest safely
-  const currentQuest = MAIN_QUESTS[questStep] || MAIN_QUESTS[MAIN_QUESTS.length - 1];
-  
-  // Check if task is done
-  const isTaskDone = currentQuest.isReady();
+  // 🔥 2. 添加挂载状态检查
+  const [isMounted, setIsMounted] = useState(false);
 
-  // Handle quest completion
+  // 🔥 3. 组件加载完毕后，将 isMounted 设为 true
+  useEffect(() => {
+    setIsMounted(true);
+  }, []);
+
+  const currentQuest = MAIN_QUESTS[questStep] || MAIN_QUESTS[MAIN_QUESTS.length - 1];
+  const isTaskDone = currentQuest.isReady();
+  const isLastStep = questStep >= MAIN_QUESTS.length - 1;
+
   const handleComplete = () => {
-    if (isTaskDone) {
+    if (isTaskDone && !isLastStep) {
       if (currentQuest.reward) {
         useGameStore.setState(state => ({ gold: state.gold + currentQuest.reward! }));
       }
@@ -23,82 +29,91 @@ export default function CatGuide() {
     }
   };
 
+  // 🔥 4. 如果还没挂载（还在服务端），直接不渲染，防止报错
+  if (!isMounted) return null;
+
   return (
-    <div className="absolute bottom-6 left-6 z-50 flex items-end gap-4 pointer-events-auto select-none" onMouseDown={e => e.stopPropagation()}>
+    <div className="absolute bottom-6 left-6 z-50 flex items-end gap-5 pointer-events-auto select-none" onMouseDown={e => e.stopPropagation()}>
       
-      {/* 🐱 Cat Avatar */}
+      {/* 🐱 猫咪头像 */}
       <motion.div 
-        whileHover={{ scale: 1.1, rotate: 5 }}
-        whileTap={{ scale: 0.9 }}
-        className="w-24 h-24 relative cursor-pointer group"
-        onClick={handleComplete} // Allow clicking the cat to complete if ready
+        whileHover={{ scale: 1.05, rotate: 3 }}
+        whileTap={{ scale: 0.95 }}
+        className="w-24 h-24 relative cursor-pointer group shrink-0"
+        onClick={handleComplete}
       >
-        <div className="w-full h-full bg-[#FFF8E7] rounded-full border-4 border-[#8B5E3C] shadow-[0_4px_0_rgba(0,0,0,0.2)] overflow-hidden relative flex items-center justify-center">
-             {/* Replace with your image if available */}
+        <div className="w-full h-full bg-[#FFF8E7] rounded-full border-[3px] border-orange-200 shadow-lg shadow-orange-100 overflow-hidden relative flex items-center justify-center">
+             {/* 这里的图片路径如果你还没换，可以用 cat-face.png 或 emoji 代替 */}
              <img src="/my-cat-npc.png" alt="Cat Mayor" className="w-full h-full object-cover" /> 
         </div>
         
-        {/* Notification Badge */}
-        {isTaskDone && questStep < MAIN_QUESTS.length - 1 && (
+        {/* 可领奖提示标记 */}
+        {isTaskDone && !isLastStep && (
              <motion.div 
-                animate={{ y: [0, -8, 0] }}
-                transition={{ repeat: Infinity, duration: 1.5 }}
-                className="absolute -top-1 -right-1 bg-green-500 text-white p-1.5 rounded-full border-2 border-white shadow-sm z-10"
+                animate={{ y: [0, -6, 0], scale: [1, 1.1, 1] }}
+                transition={{ repeat: Infinity, duration: 1.2, ease: "easeInOut" }}
+                className="absolute -top-1 -right-1 bg-gradient-to-br from-green-400 to-green-500 text-white p-1.5 rounded-full border-2 border-white shadow-sm z-10"
              >
-                <Gift size={20} className="fill-current" />
+                <Gift size={18} className="fill-current" />
              </motion.div>
         )}
       </motion.div>
 
-      {/* 💬 Speech Bubble */}
+      {/* 💬 对话气泡 */}
       <AnimatePresence mode='wait'>
         <motion.div 
             key={questStep} 
-            initial={{ opacity: 0, x: -20, scale: 0.9 }}
-            animate={{ opacity: 1, x: 0, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.9 }}
+            initial={{ opacity: 0, x: -20, y: 10, scale: 0.95 }}
+            animate={{ opacity: 1, x: 0, y: 0, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.95 }}
             className={`
-                relative bg-white/95 backdrop-blur-md px-6 py-5 rounded-3xl rounded-bl-none shadow-xl border-4 max-w-xs sm:max-w-md
-                ${isTaskDone ? 'border-green-400 shadow-green-200' : 'border-[#8B5E3C] shadow-orange-200'}
+                relative bg-[#FFF8E7]/95 backdrop-blur-md px-6 py-5 rounded-3xl rounded-bl-none shadow-xl border-2 max-w-xs sm:max-w-[28rem]
+                ${isTaskDone && !isLastStep
+                    ? 'border-green-300 shadow-green-100/50' 
+                    : 'border-orange-200/80 shadow-orange-100/50'
+                }
             `}
         >
-            {/* Quest Header */}
+            {/* 任务标题头 */}
             <div className="text-xs font-black uppercase tracking-widest mb-2 flex items-center gap-2">
-                {isTaskDone ? (
+                {isTaskDone && !isLastStep ? (
                     <span className="text-green-600 flex items-center gap-1">
-                        <CheckCircle2 size={14} /> QUEST COMPLETE!
+                        <Sparkles size={14} /> QUEST COMPLETE!
                     </span>
                 ) : (
-                    <span className="text-[#8B5E3C]/60 flex items-center gap-1">
-                        <MessageCircle size={14} /> CURRENT GOAL: STEP {questStep + 1}
+                    <span className="text-orange-700/60 flex items-center gap-1">
+                        <MessageCircle size={14} /> 
+                        {isLastStep ? "FREE MODE" : `CURRENT GOAL: STEP ${questStep + 1}`}
                     </span>
                 )}
             </div>
 
-            {/* Quest Text */}
-            <p className="text-base font-bold text-slate-700 leading-snug mb-4">
+            {/* 任务文字内容 */}
+            <p className="text-[15px] font-bold text-slate-700 leading-relaxed mb-5">
                 {currentQuest.text}
             </p>
 
-            {/* Action Button */}
-            {isTaskDone && questStep < MAIN_QUESTS.length - 1 ? (
-                <button 
-                    onClick={handleComplete}
-                    className="w-full bg-green-500 hover:bg-green-600 text-white font-black py-3 rounded-xl shadow-[0_4px_0_#15803d] active:shadow-none active:translate-y-1 transition-all flex items-center justify-center gap-2 animate-pulse"
-                >
-                    <Gift size={20} />
-                    {currentQuest.buttonText || "Claim Reward"}
-                </button>
-            ) : (
-                // Progress Bar (Fake or Real)
-                <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
-                    <motion.div 
-                        initial={{ width: 0 }} 
-                        animate={{ width: isTaskDone ? '100%' : '30%' }} 
-                        className={`h-full rounded-full ${isTaskDone ? 'bg-green-500' : 'bg-orange-300'}`} 
-                    />
-                </div>
-            )}
+            {/* 按钮或进度条区域 */}
+            <div className="relative">
+                {isTaskDone && !isLastStep ? (
+                    <button 
+                        onClick={handleComplete}
+                        className="w-full bg-gradient-to-r from-green-400 to-green-500 hover:from-green-500 hover:to-green-600 text-white font-black py-3 rounded-2xl shadow-md shadow-green-200 active:shadow-none active:translate-y-0.5 transition-all flex items-center justify-center gap-2 animate-pulse"
+                    >
+                        <Gift size={20} />
+                        {currentQuest.buttonText || "Claim Reward"}
+                    </button>
+                ) : (
+                    <div className="w-full h-2.5 bg-orange-100/50 rounded-full overflow-hidden">
+                        <motion.div 
+                            initial={{ width: 0 }} 
+                            animate={{ width: isLastStep ? '100%' : '30%' }} 
+                            className={`h-full rounded-full ${isLastStep ? 'bg-gradient-to-r from-orange-300 to-orange-400' : 'bg-gradient-to-r from-orange-300 to-orange-400'}`} 
+                        />
+                    </div>
+                )}
+            </div>
+            
             
         </motion.div>
       </AnimatePresence>
