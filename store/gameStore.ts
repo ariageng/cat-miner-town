@@ -7,7 +7,7 @@ import { SHOP_ITEMS } from '@/data/shopItems';
 // 🎒 物品接口
 export interface Item {
   id: string;      // 唯一ID (wood-123456)
-  baseId?: string; // 原始ID (wood) - 用于图鉴堆叠
+  baseId?: string; // 原始ID (wood)
   char: string;
   type: 'basic' | 'compound'; 
   name: string;
@@ -16,7 +16,7 @@ export interface Item {
 // 🏠 已放置建筑接口
 export interface PlacedBuilding {
   id: string;
-  typeId: string; // 对应 SHOP_ITEMS 里的 id
+  typeId: string;
   row: number;
   col: number;
 }
@@ -29,6 +29,14 @@ export interface CatResident {
 }
 
 interface GameState {
+  // 🆔 身份与元数据 (为云端准备)
+  userId: string;       
+  lastSaveTime: number; 
+  version: number;      
+
+  // ☁️ 云端同步接口
+  syncToCloud: () => Promise<void>;
+
   // --- 基础资源 ---
   gold: number;
   stamina: number;
@@ -37,7 +45,7 @@ interface GameState {
   // --- 背包与图鉴 ---
   inventory: Item[];
   maxInventory: number;
-  unlockedCollection: string[]; // 存 baseId
+  unlockedCollection: string[];
 
   // --- 任务进度 ---
   questStep: number;
@@ -49,11 +57,11 @@ interface GameState {
   setSfxVolume: (v: number) => void;
 
   // --- 🏗️ 建造与地图系统 ---
-  mapLevel: number; // 扩建等级 (0-4)
+  mapLevel: number;
   placedBuildings: PlacedBuilding[];
   residents: CatResident[];
 
-  // --- 🏗️ 放置模式状态 (UI交互用) ---
+  // --- 🏗️ 放置模式状态 ---
   isPlacementMode: boolean;
   placementItem: string | null;
   enterPlacementMode: (itemId: string) => void;
@@ -78,7 +86,12 @@ export const useGameStore = create<GameState>()(
   persist(
     (set, get) => ({
       // ================= 初始状态 =================
-      gold: 500, // 初始资金
+      // 🆔 临时生成一个游客ID
+      userId: `guest_${Math.floor(Math.random() * 1000000)}`, 
+      lastSaveTime: Date.now(),
+      version: 1,
+
+      gold: 500,
       stamina: 100,
       maxStamina: 100,
       inventory: [],
@@ -86,7 +99,6 @@ export const useGameStore = create<GameState>()(
       unlockedCollection: [],
       questStep: 0,
       
-      // 🔥 默认音量设置为 30%
       bgmVolume: 0.3, 
       sfxVolume: 0.3,
 
@@ -95,6 +107,20 @@ export const useGameStore = create<GameState>()(
       residents: [],
       isPlacementMode: false,
       placementItem: null,
+
+      // ================= ☁️ 云端同步模拟 =================
+      syncToCloud: async () => {
+        const state = get();
+        console.log(`[Cloud Sync] Uploading save for User: ${state.userId}`);
+        console.log(`[Cloud Sync] Timestamp: ${new Date(state.lastSaveTime).toISOString()}`);
+        console.log(`[Cloud Sync] Data payload size: ${JSON.stringify(state).length} bytes`);
+        
+        // 模拟网络延迟
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+        // 这里以后替换成: await fetch('/api/save', { ... })
+        console.log("[Cloud Sync] ✅ Save successful!");
+      },
 
       // ================= 设置 Actions =================
       setBgmVolume: (v) => set({ bgmVolume: v }),
@@ -106,7 +132,8 @@ export const useGameStore = create<GameState>()(
       })),
 
       completeQuest: () => set((state) => ({ 
-        questStep: state.questStep + 1 
+        questStep: state.questStep + 1,
+        lastSaveTime: Date.now() // 🔥 更新存档时间
       })),
 
       mineItem: (item) => {
@@ -114,7 +141,6 @@ export const useGameStore = create<GameState>()(
         if (state.stamina < 1) return { success: false, msg: "Not enough Energy! 💤" };
         if (state.inventory.length >= state.maxInventory) return { success: false, msg: "Backpack Full! 🎒" };
 
-        // 提取纯净ID
         const baseId = item.id.includes('-') ? item.id.split('-')[0] : item.id;
 
         set((state) => ({
@@ -122,7 +148,8 @@ export const useGameStore = create<GameState>()(
           inventory: [...state.inventory, { ...item, baseId }],
           unlockedCollection: state.unlockedCollection.includes(baseId) 
             ? state.unlockedCollection 
-            : [...state.unlockedCollection, baseId]
+            : [...state.unlockedCollection, baseId],
+          lastSaveTime: Date.now() // 🔥 更新存档时间
         }));
         return { success: true, msg: "" };
       },
@@ -132,7 +159,11 @@ export const useGameStore = create<GameState>()(
         const price = item.type === 'basic' ? 1 : 5;
         const newInv = [...state.inventory];
         newInv.splice(index, 1);
-        return { gold: state.gold + price, inventory: newInv };
+        return { 
+          gold: state.gold + price, 
+          inventory: newInv,
+          lastSaveTime: Date.now() // 🔥 更新存档时间
+        };
       }),
 
       combineItems: (idx1, idx2) => {
@@ -148,7 +179,7 @@ export const useGameStore = create<GameState>()(
         if (recipe) {
           const newInv = [...state.inventory];
           const removeIndices = [idx1, idx2].sort((a, b) => b - a);
-          newInv.splice(removeIndices[0], 1); // 先删后面的，防止索引错位
+          newInv.splice(removeIndices[0], 1);
           newInv.splice(removeIndices[1], 1);
           
           const baseId = recipe.result.id;
@@ -166,7 +197,11 @@ export const useGameStore = create<GameState>()(
             ? state.unlockedCollection
             : [...state.unlockedCollection, baseId];
 
-          set({ inventory: newInv, unlockedCollection: newCollection });
+          set({ 
+            inventory: newInv, 
+            unlockedCollection: newCollection,
+            lastSaveTime: Date.now() // 🔥 更新存档时间
+          });
           return { success: true, newItem };
         }
         return { success: false };
@@ -193,7 +228,6 @@ export const useGameStore = create<GameState>()(
             return { success: false, msg: "Not enough Gold!" };
         }
 
-        // 唯一建筑检查
         if (shopItem.type === 'unique') {
             const hasExisting = state.placedBuildings.some(b => b.typeId === itemId);
             if (hasExisting) return { success: false, msg: "You already have one!" };
@@ -206,7 +240,6 @@ export const useGameStore = create<GameState>()(
             col
         };
 
-        // 处理附带的猫咪居民
         let newResidents = [...state.residents];
         if (itemId === 'cat_house') {
             newResidents.push({
@@ -221,10 +254,11 @@ export const useGameStore = create<GameState>()(
             placedBuildings: [...state.placedBuildings, newBuilding],
             residents: newResidents,
             isPlacementMode: false,
-            placementItem: null
+            placementItem: null,
+            lastSaveTime: Date.now() // 🔥 更新存档时间
         });
 
-        get().playSound('build'); // 播放建造音效
+        get().playSound('build');
         return { success: true, msg: "Built successfully!" };
       },
 
@@ -244,14 +278,14 @@ export const useGameStore = create<GameState>()(
 
         set({
             gold: state.gold - cost,
-            mapLevel: state.mapLevel + 1
+            mapLevel: state.mapLevel + 1,
+            lastSaveTime: Date.now() // 🔥 更新存档时间
         });
         
         get().playSound('success');
         return { success: true, msg: "Town expanded!" };
       },
 
-      // ================= 🎨 Art Lab 写字转化 =================
       transmuteItem: (costItemId, targetChar) => {
         const state = get();
         const costItemIndex = state.inventory.findIndex(i => i.id === costItemId);
@@ -262,7 +296,7 @@ export const useGameStore = create<GameState>()(
         if (!targetData) return { success: false, msg: "Unknown character" };
 
         const newInv = [...state.inventory];
-        newInv.splice(costItemIndex, 1); // 消耗
+        newInv.splice(costItemIndex, 1);
 
         const newItem: Item = {
             id: `${targetData.id}-${Date.now()}`,
@@ -273,7 +307,10 @@ export const useGameStore = create<GameState>()(
         };
 
         newInv.push(newItem);
-        set({ inventory: newInv });
+        set({ 
+            inventory: newInv,
+            lastSaveTime: Date.now() // 🔥 更新存档时间
+        });
         
         get().playSound('transmute');
         return { success: true, msg: "Transmuted!", newItem };
@@ -309,9 +346,8 @@ export const useGameStore = create<GameState>()(
           fail: '/fail.mp3',
           hover: '/hover.mp3',
           click: '/hover.mp3',
-          // 🔥 补全映射，防止报错
-          build: '/success.mp3', // 建造成功暂用 success
-          transmute: '/success.mp3' // 转化成功暂用 success
+          build: '/success.mp3', 
+          transmute: '/success.mp3'
         };
 
         const path = fileMap[type];
@@ -327,6 +363,14 @@ export const useGameStore = create<GameState>()(
         }
       }
     }),
-    { name: 'cat-town-save-v7' } // 🔥 升级到 v7，强制刷新用户的音量设置
+    { 
+      name: 'cat-town-save-v7',
+      // 这里可以加监听器，每次加载存档时打印日志
+      onRehydrateStorage: () => (state) => {
+        if (state) {
+            console.log(`[Save System] Loaded save for User: ${state.userId}`);
+        }
+      }
+    }
   )
 );
