@@ -1,4 +1,5 @@
 'use client';
+
 import { useState, useRef } from 'react';
 import { useGameStore } from '@/store/gameStore';
 import { X, RefreshCw, PenTool, Eraser } from 'lucide-react';
@@ -67,9 +68,9 @@ export default function ArtLabModal({ isOpen, onClose }: Props) {
             <div>
                 <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">1. Select Material</h3>
                 <div className="grid grid-cols-4 gap-2">
-                    {inventory.map(item => (
+                    {inventory.map((item, index) => (
                         <button
-                            key={item.id}
+                            key={`${item.id}-${index}`}
                             onClick={() => setSelectedMaterialId(item.id)}
                             className={`aspect-square rounded-lg border-2 flex items-center justify-center text-xl font-serif transition-all
                                 ${selectedMaterialId === item.id ? 'border-purple-500 bg-purple-100' : 'border-slate-200 bg-white'}
@@ -86,7 +87,8 @@ export default function ArtLabModal({ isOpen, onClose }: Props) {
             <div className="flex-1">
                 <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">2. Target Element</h3>
                 <div className="flex flex-wrap gap-2 h-32 overflow-y-auto content-start">
-                    {BASIC_CHARS.filter(c => !c.disableTTS).map(c => (
+                    {/* 🔥 修复重点：这里改成了 !c.note，不再使用 disableTTS */}
+                    {BASIC_CHARS.filter(c => !c.note).map(c => (
                         <button 
                             key={c.id} 
                             onClick={() => setTargetChar(c.char)}
